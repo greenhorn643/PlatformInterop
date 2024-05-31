@@ -60,25 +60,28 @@ internal class InteropServer<TClientInterface>(
 					var rt = methodInfo.ReturnType.GetTaskType()
 						?? throw new PlatformInteropException($"attempted to call synchronous method {methodInfo.Name}; only asyncronous methods are supported");
 
-					try
+					Task.Run(async () =>
 					{
-						var t = (Task)methodInfo.Invoke(client, req.Args)!;
-						await t;
-
-						object? value = null;
-
-						if (rt != typeof(void))
+						try
 						{
-							var resultProperty = t.GetType().GetProperty("Result")!;
-							value = resultProperty.GetValue(t);
-						}
+							var t = (Task)methodInfo.Invoke(client, req.Args)!;
+							await t;
 
-						await channel.SendAsync(SerializeSuccess(req.CallerId, value, rt));
-					}
-					catch (Exception ex)
-					{
-						await channel.SendAsync(SerializeError(req.CallerId, ex.Message, rt));
-					}
+							object? value = null;
+
+							if (rt != typeof(void))
+							{
+								var resultProperty = t.GetType().GetProperty("Result")!;
+								value = resultProperty.GetValue(t);
+							}
+
+							await channel.SendAsync(SerializeSuccess(req.CallerId, value, rt));
+						}
+						catch (Exception ex)
+						{
+							await channel.SendAsync(SerializeError(req.CallerId, ex.Message, rt));
+						}
+					});
 				}
 			}
 		}
