@@ -1,8 +1,12 @@
-﻿namespace PlatformInterop.Shared.Implementation.JsonInteropSerializer;
+﻿using Nito.Collections;
+
+namespace PlatformInterop.Shared.Implementation.JsonInteropSerializer;
 
 internal static class LengthPrefix
 {
-	public class InvalidLengthException : Exception { }
+	public class InvalidLengthException(string what, int expectedLength, int actualLength)
+		: Exception($"{what} | expected length: {expectedLength} -- actual length: {actualLength}")
+	{ }
 
 
 	public static byte[] Package(byte[][] sections)
@@ -28,70 +32,97 @@ internal static class LengthPrefix
 		return [.. buffer];
 	}
 
-	public static bool HasFullPacket(List<byte> buffer)
+	public static bool TryPopPacket(Deque<byte> buffer, out byte[]? packet)
+	{
+		if (TryPeekPacket(buffer, out packet))
+		{
+			buffer.RemoveRange(0, packet!.Length);
+			return true;
+		}
+		return false;
+	}
+
+	public static bool TryPeekPacket(Deque<byte> buffer, out byte[]? packet)
 	{
 		if (buffer.Count < 4)
 		{
+			packet = null;
 			return false;
 		}
 
 		int offset = 0;
 		int packetLength = DecodeInt32(buffer, ref offset);
 
-		if (packetLength < buffer.Count)
+		if (packetLength > buffer.Count)
 		{
-			throw new InvalidLengthException();
+			packet = null;
+			return false;
 		}
 
-		return packetLength == buffer.Count;
+		packet = buffer.Take(packetLength).ToArray();
+		return true;
 	}
 
-	public static byte[][] Unpackage(List<byte> buffer)
+	public static byte[][] Unpackage(byte[] packet)
 	{
-		if (buffer.Count < 4)
+		if (packet.Length < 4)
 		{
-			throw new InvalidLengthException();
+			throw new InvalidLengthException(
+				nameof(Unpackage) + " length prefix",
+				4,
+				packet.Length);
 		}
 
 		int offset = 0;
-		int packetLength = DecodeInt32(buffer, ref offset);
+		int packetLength = DecodeInt32(packet, ref offset);
 
-		if (packetLength != buffer.Count)
+		if (packetLength > packet.Length)
 		{
-			throw new InvalidLengthException();
+			throw new InvalidLengthException(
+				nameof(Unpackage) + " packet length",
+				packetLength,
+				packet.Length);
 		}
 
 		List<byte[]> sections = [];
 
-		while (offset < buffer.Count)
+		while (offset < packet.Length)
 		{
-			sections.Add(TakeLengthPrefixedChunk(buffer, ref offset));
+			sections.Add(TakeLengthPrefixedChunk(packet, ref offset));
 		}
 
-		if (offset != buffer.Count)
+		if (offset != packetLength)
 		{
-			throw new InvalidLengthException();
+			throw new InvalidLengthException(
+				nameof(Unpackage) + " bytes consumed",
+				packet.Length,
+				offset);
 		}
 
 		return [.. sections];
 	}
 
-	private static byte[] TakeLengthPrefixedChunk(List<byte> buffer, ref int offset)
+	private static byte[] TakeLengthPrefixedChunk(byte[] packet, ref int offset)
 	{
-		if (sizeof(int) + offset > buffer.Count)
+		if (sizeof(int) + offset > packet.Length)
 		{
-			throw new InvalidLengthException();
+			throw new InvalidLengthException(
+				nameof(TakeLengthPrefixedChunk) + " length prefix",
+				sizeof(int) + offset,
+				packet.Length);
 		}
 
-		int chunkSize = DecodeInt32(buffer, ref offset);
+		int chunkSize = DecodeInt32(packet, ref offset);
 
-		if (chunkSize <= 0 || chunkSize + offset > buffer.Count)
+		if (chunkSize <= 0 || chunkSize + offset > packet.Length)
 		{
-			throw new InvalidLengthException();
+			throw new InvalidLengthException(
+				nameof(TakeLengthPrefixedChunk) + " chunk size",
+				packet.Length,
+				chunkSize);
 		}
 
-		var chunk = new byte[chunkSize];
-		buffer.CopyTo(offset, chunk, 0, chunkSize);
+		var chunk = packet.AsSpan().Slice(offset, chunkSize).ToArray();
 		offset += chunkSize;
 		return chunk;
 	}
@@ -105,7 +136,8 @@ internal static class LengthPrefix
 				(byte)(x >> 24)];
 	}
 
-	private static int DecodeInt32(List<byte> buffer, ref int offset)
+	private static int DecodeInt32<TBuffer>(TBuffer buffer, ref int offset)
+		where TBuffer : IList<byte>
 	{
 		int x = buffer[offset]
 			| buffer[offset + 1] << 8

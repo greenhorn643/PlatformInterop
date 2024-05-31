@@ -37,8 +37,15 @@ public static class ClientFactory
 			}
 		}
 
-		new Thread(LogStdOut).Start();
-		new Thread(LogStdError).Start();
+		new Thread(LogStdOut)
+		{
+			IsBackground = true
+		}.Start();
+
+		new Thread(LogStdError)
+		{
+			IsBackground = true
+		}.Start();
 	}
 
 	public static (IInteropChannel, IDisposable) CreateClientChannel(string hostExecutable)

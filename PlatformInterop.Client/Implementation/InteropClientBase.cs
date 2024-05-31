@@ -1,12 +1,20 @@
-﻿using PlatformInterop.Shared;
+﻿using AsyncToolkit;
+using Nito.Collections;
+using PlatformInterop.Shared;
 using System.Collections.Concurrent;
 using System.Reflection;
 
 namespace PlatformInterop.Client.Implementation;
 
-public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer interopSerializer)
+public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer interopSerializer) : IAsyncRunnable, IAsyncDisposable
 {
 	private static readonly ConcurrentDictionary<string, InteropMethodInfo> cache = [];
+	private readonly ConcurrentDictionary<string, TaskCompletionSource<object?>> pendingMethodCalls = [];
+	private readonly ConcurrentDictionary<string, Type> pendingMethodReturnTypes = [];
+	private readonly TaskCompletionSource pendingDispose = new();
+	private bool disposed = false;
+
+	public Func<Task> Runnable => ReceiverLoop;
 
 	public static string RegisterMethod(
 		MethodInfo method)
@@ -26,6 +34,24 @@ public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer
 
 	public async Task<object?> RequestAsync(string methodId, object[] args)
 	{
+		var callerId = Guid.NewGuid().ToString();
+
+		var tcs = new TaskCompletionSource<object?>();
+
+		if (!pendingMethodCalls.TryAdd(callerId, tcs))
+		{
+			throw new PlatformInteropException("guid collision");
+		}
+
+		await SendRequest(callerId, methodId, args);
+
+		return await tcs.Task;
+	}
+
+	private async Task SendRequest(string callerId, string methodId, object[] args)
+	{
+		ObjectDisposedException.ThrowIf(disposed, this);
+
 		if (!cache.TryGetValue(methodId, out var methodInfo))
 		{
 			throw new ArgumentException(
@@ -43,10 +69,24 @@ public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer
 		var rt = methodInfo.ReturnType.GetTaskType()
 			?? throw new PlatformInteropException($"attempted to call synchronous method {methodInfo.MethodName}; only asyncronous methods are supported");
 
-		var bytes = interopSerializer.SerializeRequest(methodInfo, args);
-		await channel.SendAsync(bytes);
+		if (!pendingMethodReturnTypes.TryAdd(callerId, rt))
+		{
+			throw new PlatformInteropException("guid collision");
+		}
 
-		List<byte> buffer = [];
+		var bytes = interopSerializer.SerializeRequest(new InteropRequest
+		{
+			CallerId = callerId,
+			MethodInfo = methodInfo,
+			Args = args,
+		});
+
+		await channel.SendAsync(bytes);
+	}
+
+	private async Task ReceiverLoop()
+	{
+		Deque<byte> buffer = [];
 		byte[] tmpBuffer = new byte[1024];
 
 		while (true)
@@ -58,24 +98,93 @@ public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer
 				throw new PlatformInteropException("connection to host process broken");
 			}
 
-			buffer.AddRange(tmpBuffer.AsSpan()[..nBytes]);
-			var r = interopSerializer.DeserializeResponse(buffer, rt);
+			buffer.InsertRange(buffer.Count, tmpBuffer[..nBytes]);
 
-			if (r.ResultType == DeserializationResultType.InsufficientData)
+			while (true)
 			{
-				continue;
-			}
+				var rCid = interopSerializer.DeserializeCallerId(buffer);
 
-			var response = r.Value!;
+				if (rCid.ResultType == DeserializationResultType.InsufficientData)
+				{
+					break;
+				}
 
-			if (response.IsSuccess)
-			{
-				return response.Value;
+				var callerId = rCid.Value!;
+
+				if (callerId == "disposed")
+				{
+					KillPendingTasks();
+					pendingDispose.SetResult();
+					return;
+				}
+
+				if (!pendingMethodReturnTypes.TryRemove(callerId, out var rt))
+				{
+					throw new PlatformInteropException($"{nameof(pendingMethodReturnTypes)}: {nameof(callerId)} {callerId} not found");
+				}
+
+				var rResp = interopSerializer.DeserializeResponse(buffer, rt);
+
+				if (rResp.ResultType == DeserializationResultType.InsufficientData)
+				{
+					throw new PlatformInteropException("second pass deserialization failure");
+				}
+
+				if (!pendingMethodCalls.TryRemove(callerId, out var tcs))
+				{
+					throw new PlatformInteropException($"{nameof(pendingMethodCalls)}: {nameof(callerId)} {callerId} not found");
+				}
+
+				var response = rResp.Value!;
+
+				Task.Run(() =>
+				{
+					if (response.IsSuccess)
+					{
+						tcs.SetResult(response.Value);
+					}
+					else
+					{
+						tcs.SetException(
+							new PlatformInteropException(response.ErrorMessage ?? "(no error message)"));
+					}
+				});
 			}
-			else
+		}
+	}
+
+	private void KillPendingTasks()
+	{
+		try
+		{
+			foreach (var (_, tcs) in pendingMethodCalls)
 			{
-				throw new PlatformInteropException(response.ErrorMessage ?? "(no error message)");
+				tcs.SetException(new ObjectDisposedException("InteropHost"));
 			}
+		}
+		catch { }
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		if (!disposed)
+		{
+			disposed = true;
+
+			var bytes = interopSerializer.SerializeRequest(new InteropRequest
+			{
+				CallerId = "dispose",
+				MethodInfo = new InteropMethodInfo
+				{
+					MethodName = "Dispose",
+					ArgumentTypes = [],
+					ReturnType = typeof(void)
+				},
+				Args = [],
+			});
+
+			await channel.SendAsync(bytes);
+			await pendingDispose.Task;
 		}
 	}
 }

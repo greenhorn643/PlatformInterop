@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using Nito.Collections;
+using System.Reflection;
 using System.Text.Json;
 using static PlatformInterop.Shared.Implementation.JsonInteropSerializer.ClientSerializer;
 
@@ -6,21 +7,44 @@ namespace PlatformInterop.Shared.Implementation.JsonInteropSerializer;
 
 internal class HostSerializer(MethodLocator methodLocator) : IInteropHostSerializer
 {
-	public DeserializationResult<(MethodInfo, object[])> DeserializeRequest(List<byte> buffer)
+	public DeserializationResult<string> DeserializeCallerId(Deque<byte> buffer)
 	{
-		if (!LengthPrefix.HasFullPacket(buffer))
+		if (!LengthPrefix.TryPeekPacket(buffer, out var packet))
 		{
-			return DeserializeRequestInsufficentData();
+			return DeserializeRequestInsufficentData<string>();
 		}
 
-		var sections = LengthPrefix.Unpackage(buffer);
+		var sections = LengthPrefix.Unpackage(packet!);
 
 		if (sections.Length == 0)
 		{
 			throw new InvalidPacketException($"packet contains no data");
 		}
 
-		var safeMethodInfo = JsonSerializer.Deserialize<JsonSafeMethodInfo>(sections[0])
+		var callerId = JsonSerializer.Deserialize<string>(sections[0])
+			?? throw new JsonDeserializationException(nameof(String));
+
+		return DeserializeRequestSuccess(callerId);
+	}
+
+	public DeserializationResult<(InteropRequest, MethodInfo)> DeserializeRequest(Deque<byte> buffer)
+	{
+		if (!LengthPrefix.TryPopPacket(buffer, out var packet))
+		{
+			return DeserializeRequestInsufficentData<(InteropRequest, MethodInfo)>();
+		}
+
+		var sections = LengthPrefix.Unpackage(packet!);
+
+		if (sections.Length == 0)
+		{
+			throw new InvalidPacketException($"packet contains no data");
+		}
+
+		var callerId = JsonSerializer.Deserialize<string>(sections[0])
+			?? throw new JsonDeserializationException(nameof(String));
+
+		var safeMethodInfo = JsonSerializer.Deserialize<JsonSafeMethodInfo>(sections[1])
 			?? throw new JsonDeserializationException(nameof(JsonSafeMethodInfo));
 
 		if (!methodLocator.TryLocateMethod(safeMethodInfo, out var methodInfo))
@@ -30,21 +54,28 @@ internal class HostSerializer(MethodLocator methodLocator) : IInteropHostSeriali
 
 		var interopMethodInfo = InteropMethodInfo.FromFullMethodInfo(methodInfo!);
 
-		if (sections.Length != interopMethodInfo.ArgumentTypes.Length + 1)
+		if (sections.Length != interopMethodInfo.ArgumentTypes.Length + 2)
 		{
 			throw new InvalidPacketException($"expected {interopMethodInfo.ArgumentTypes.Length} arguments to method"
-				+ $" {JsonSerializer.Serialize(safeMethodInfo)}. Found {sections.Length - 1}");
+				+ $" {JsonSerializer.Serialize(safeMethodInfo)}. Found {sections.Length - 2}");
 		}
 
 		var args = new object[interopMethodInfo.ArgumentTypes.Length];
 
 		for (int i = 0; i < args.Length; i++)
 		{
-			args[i] = JsonSerializer.Deserialize(sections[i + 1], interopMethodInfo.ArgumentTypes[i])
+			args[i] = JsonSerializer.Deserialize(sections[i + 2], interopMethodInfo.ArgumentTypes[i])
 				?? throw new JsonDeserializationException(interopMethodInfo.ArgumentTypes[i].Name);
 		}
 
-		return DeserializeRequestSuccess(methodInfo!, args);
+		var req = new InteropRequest
+		{
+			CallerId = callerId,
+			MethodInfo = interopMethodInfo,
+			Args = args,
+		};
+
+		return DeserializeRequestSuccess((req, methodInfo!));
 	}
 	public byte[] SerializeResponse(InteropResponse resp, Type returnType)
 	{
@@ -63,20 +94,20 @@ internal class HostSerializer(MethodLocator methodLocator) : IInteropHostSeriali
 		}
 	}
 
-	private static DeserializationResult<(MethodInfo, object[])> DeserializeRequestInsufficentData()
+	private static DeserializationResult<T> DeserializeRequestInsufficentData<T>()
 	{
-		return new DeserializationResult<(MethodInfo, object[])>
+		return new DeserializationResult<T>
 		{
 			ResultType = DeserializationResultType.InsufficientData
 		};
 	}
 
-	private static DeserializationResult<(MethodInfo, object[])> DeserializeRequestSuccess(MethodInfo methodInfo, object[] args)
+	private static DeserializationResult<T> DeserializeRequestSuccess<T>(T value)
 	{
-		return new DeserializationResult<(MethodInfo, object[])>
+		return new DeserializationResult<T>
 		{
 			ResultType = DeserializationResultType.Success,
-			Value = (methodInfo, args),
+			Value = value,
 		};
 	}
 }

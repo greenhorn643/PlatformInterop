@@ -107,6 +107,22 @@ internal static class InteropClientWeaver
 			&& method.ReturnType.GetGenericTypeDefinition() == typeof(Task<>));
 	}
 
+	private static Type TaskResultType(Type taskType)
+	{
+		if (taskType == typeof(Task))
+		{
+			return typeof(void);
+		}
+		else if (taskType.GetGenericTypeDefinition() == typeof(Task<>))
+		{
+			return taskType.GetGenericArguments()[0];
+		}
+		else
+		{
+			throw new ArgumentException("not a Task or Task<T>", nameof(taskType));
+		}
+	}
+
 	private static void DefineMethod(
 		TypeBuilder typeBuilder,
 		MethodInfo method)
@@ -165,6 +181,19 @@ internal static class InteropClientWeaver
 		methodGenerator.Emit(OpCodes.Ldloc_0);
 
 		methodGenerator.Emit(OpCodes.Call, requestAsyncMethod);
+
+		var taskResultType = TaskResultType(method.ReturnType);
+
+		if (taskResultType.IsValueType && taskResultType != typeof(void))
+		{
+			var convertMethod = typeof(ValueTaskConverter)
+				.GetMethod(nameof(ValueTaskConverter.Convert))!;
+
+			var typeSpecifiedConvertMethod = convertMethod.MakeGenericMethod(taskResultType);
+
+			methodGenerator.Emit(OpCodes.Call, typeSpecifiedConvertMethod);
+		}
+
 		methodGenerator.Emit(OpCodes.Ret);
 
 		typeBuilder.DefineMethodOverride(

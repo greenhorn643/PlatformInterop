@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using Nito.Collections;
+using System.Text.Json;
 
 namespace PlatformInterop.Shared.Implementation.JsonInteropSerializer;
 
@@ -10,14 +11,14 @@ internal class ClientSerializer : IInteropClientSerializer
 
 
 
-	public DeserializationResult<InteropResponse> DeserializeResponse(List<byte> buffer, Type returnType)
+	public DeserializationResult<InteropResponse> DeserializeResponse(Deque<byte> buffer, Type returnType)
 	{
-		if (!LengthPrefix.HasFullPacket(buffer))
+		if (!LengthPrefix.TryPopPacket(buffer, out var packet))
 		{
-			return DeserializeResponseInsufficentData();
+			return DeserializeInsufficentData<InteropResponse>();
 		}
 
-		var sections = LengthPrefix.Unpackage(buffer);
+		var sections = LengthPrefix.Unpackage(packet!);
 
 		if (sections.Length == 0)
 		{
@@ -31,17 +32,17 @@ internal class ClientSerializer : IInteropClientSerializer
 		{
 			verifySectionCount(2);
 
-			var value = JsonSerializer.Deserialize(sections[1], returnType)
-				?? throw new JsonDeserializationException(returnType.Name);
+			var value = JsonSerializer.Deserialize(sections[1], returnType);
 
 			var resp = new InteropResponse
 			{
+				CallerId = safeResp.CallerId,
 				IsSuccess = true,
 				ErrorMessage = null,
 				Value = value,
 			};
 
-			return DeserializeResponseSuccess(resp);
+			return DeserializeSuccess(resp);
 		}
 		else
 		{
@@ -49,12 +50,13 @@ internal class ClientSerializer : IInteropClientSerializer
 
 			var resp = new InteropResponse
 			{
+				CallerId = safeResp.CallerId,
 				IsSuccess = safeResp.IsSuccess,
 				ErrorMessage = safeResp.ErrorMessage,
 				Value = null,
 			};
 
-			return DeserializeResponseSuccess(resp);
+			return DeserializeSuccess(resp);
 		}
 
 		void verifySectionCount(int expectedCount)
@@ -66,28 +68,49 @@ internal class ClientSerializer : IInteropClientSerializer
 		}
 	}
 
-	public byte[] SerializeRequest(InteropMethodInfo methodInfo, object[] args)
+	public byte[] SerializeRequest(InteropRequest req)
 	{
-		return LengthPrefix.Package(
-			[ JsonSerializer.SerializeToUtf8Bytes(new JsonSafeMethodInfo(methodInfo)),
-			.. Enumerable.Range(0, args.Length)
-				.Select(i => JsonSerializer.SerializeToUtf8Bytes(args[i], methodInfo.ArgumentTypes[i])),
-			]);
+		return LengthPrefix.Package([
+			JsonSerializer.SerializeToUtf8Bytes(req.CallerId),
+			JsonSerializer.SerializeToUtf8Bytes(new JsonSafeMethodInfo(req.MethodInfo)),
+			.. Enumerable.Range(0, req.Args.Length)
+				.Select(i => JsonSerializer.SerializeToUtf8Bytes(req.Args[i], req.MethodInfo.ArgumentTypes[i])),
+		]);
 	}
-	private static DeserializationResult<InteropResponse> DeserializeResponseInsufficentData()
+	private static DeserializationResult<T> DeserializeInsufficentData<T>()
 	{
-		return new DeserializationResult<InteropResponse>
+		return new DeserializationResult<T>
 		{
 			ResultType = DeserializationResultType.InsufficientData
 		};
 	}
-	private static DeserializationResult<InteropResponse> DeserializeResponseSuccess(InteropResponse resp)
+	private static DeserializationResult<T> DeserializeSuccess<T>(T value)
 	{
-		return new DeserializationResult<InteropResponse>
+		return new DeserializationResult<T>
 		{
 			ResultType = DeserializationResultType.Success,
-			Value = resp,
+			Value = value,
 		};
+	}
+
+	public DeserializationResult<string> DeserializeCallerId(Deque<byte> buffer)
+	{
+		if (!LengthPrefix.TryPeekPacket(buffer, out var packet))
+		{
+			return DeserializeInsufficentData<string>();
+		}
+
+		var sections = LengthPrefix.Unpackage(packet!);
+
+		if (sections.Length == 0)
+		{
+			throw new InvalidPacketException($"packet contains no data");
+		}
+
+		var safeResp = JsonSerializer.Deserialize<JsonSafeResponse>(sections[0])
+			?? throw new JsonDeserializationException(nameof(JsonSafeResponse));
+
+		return DeserializeSuccess(safeResp.CallerId);
 	}
 }
 

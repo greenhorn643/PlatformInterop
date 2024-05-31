@@ -4,6 +4,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Version>1.0.3</Version>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="AsyncToolkit" Version="1.0.0" />
+    <PackageReference Include="Nito.Collections.Deque" Version="1.2.1" />
+  </ItemGroup>
 </Project>

@@ -22,10 +22,12 @@ internal class JsonSafeResponse
 
 	public JsonSafeResponse(InteropResponse resp)
 	{
+		CallerId = resp.CallerId;
 		IsSuccess = resp.IsSuccess;
 		ErrorMessage = resp.ErrorMessage;
 	}
 
+	public string CallerId { get; set; } = "";
 	public bool IsSuccess { get; set; }
 	public string? ErrorMessage { get; set; }
 }
