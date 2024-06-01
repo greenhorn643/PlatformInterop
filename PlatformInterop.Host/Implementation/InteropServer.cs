@@ -1,6 +1,6 @@
 ﻿using AsyncToolkit;
-using Nito.Collections;
 using PlatformInterop.Shared;
+using Buffer = ByteBuffer.ByteBuffer;
 
 namespace PlatformInterop.Host.Implementation;
 
@@ -9,7 +9,7 @@ internal class InteropServer<TClientInterface>(
 	IInteropChannel channel,
 	IInteropHostSerializer serializer) : IAsyncRunnable
 {
-	private readonly Deque<byte> buffer = [];
+	private readonly Buffer buffer = new();
 	private readonly byte[] tmpBuffer = new byte[1024];
 
 	public Func<Task> Runnable => Run;
@@ -27,7 +27,7 @@ internal class InteropServer<TClientInterface>(
 					throw new PlatformInteropException("channel terminated");
 				}
 
-				buffer.InsertRange(buffer.Count, tmpBuffer[..nBytes]);
+				buffer.AddRange(tmpBuffer[..nBytes]);
 
 				while (true)
 				{

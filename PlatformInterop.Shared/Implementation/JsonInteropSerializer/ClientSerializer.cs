@@ -1,17 +1,11 @@
-﻿using Nito.Collections;
-using System.Text.Json;
+﻿using System.Text.Json;
+using Buffer = ByteBuffer.ByteBuffer;
 
 namespace PlatformInterop.Shared.Implementation.JsonInteropSerializer;
 
 internal class ClientSerializer : IInteropClientSerializer
 {
-	public class JsonDeserializationException(string message) : Exception(message) { }
-	public class MethodNotFoundException(string message) : Exception(message) { }
-	public class InvalidPacketException(string message) : Exception(message) { }
-
-
-
-	public DeserializationResult<InteropResponse> DeserializeResponse(Deque<byte> buffer, Type returnType)
+	public DeserializationResult<InteropResponse> DeserializeResponse(Buffer buffer, Type returnType)
 	{
 		if (!LengthPrefix.TryPopPacket(buffer, out var packet))
 		{
@@ -93,7 +87,7 @@ internal class ClientSerializer : IInteropClientSerializer
 		};
 	}
 
-	public DeserializationResult<string> DeserializeCallerId(Deque<byte> buffer)
+	public DeserializationResult<string> DeserializeCallerId(Buffer buffer)
 	{
 		if (!LengthPrefix.TryPeekPacket(buffer, out var packet))
 		{

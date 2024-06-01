@@ -1,8 +1,8 @@
 ﻿using AsyncToolkit;
-using Nito.Collections;
 using PlatformInterop.Shared;
 using System.Collections.Concurrent;
 using System.Reflection;
+using Buffer = ByteBuffer.ByteBuffer;
 
 namespace PlatformInterop.Client.Implementation;
 
@@ -86,7 +86,7 @@ public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer
 
 	private async Task ReceiverLoop()
 	{
-		Deque<byte> buffer = [];
+		Buffer buffer = [];
 		byte[] tmpBuffer = new byte[1024];
 
 		while (true)
@@ -98,7 +98,7 @@ public class InteropClientBase(IInteropChannel channel, IInteropClientSerializer
 				throw new PlatformInteropException("connection to host process broken");
 			}
 
-			buffer.InsertRange(buffer.Count, tmpBuffer[..nBytes]);
+			buffer.AddRange(tmpBuffer.AsMemory()[..nBytes]);
 
 			while (true)
 			{

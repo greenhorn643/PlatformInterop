@@ -9,6 +9,6 @@
 
   <ItemGroup>
     <PackageReference Include="AsyncToolkit" Version="1.0.0" />
-    <PackageReference Include="Nito.Collections.Deque" Version="1.2.1" />
+    <PackageReference Include="ByteBuffer" Version="1.0.3" />
   </ItemGroup>
 </Project>

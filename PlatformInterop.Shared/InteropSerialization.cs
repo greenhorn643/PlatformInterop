@@ -1,5 +1,5 @@
-﻿using Nito.Collections;
-using System.Reflection;
+﻿using System.Reflection;
+using Buffer = ByteBuffer.ByteBuffer;
 
 namespace PlatformInterop.Shared;
 
@@ -18,14 +18,14 @@ public class DeserializationResult<T>
 public interface IInteropClientSerializer
 {
 	byte[] SerializeRequest(InteropRequest req);
-	DeserializationResult<string> DeserializeCallerId(Deque<byte> buffer);
-	DeserializationResult<InteropResponse> DeserializeResponse(Deque<byte> buffer, Type ReturnType);
+	DeserializationResult<string> DeserializeCallerId(Buffer buffer);
+	DeserializationResult<InteropResponse> DeserializeResponse(Buffer buffer, Type ReturnType);
 }
 
 public interface IInteropHostSerializer
 {
-	DeserializationResult<string> DeserializeCallerId(Deque<byte> buffer);
-	DeserializationResult<(InteropRequest, MethodInfo)> DeserializeRequest(Deque<byte> buffer);
+	DeserializationResult<string> DeserializeCallerId(Buffer buffer);
+	DeserializationResult<(InteropRequest, MethodInfo)> DeserializeRequest(Buffer buffer);
 	byte[] SerializeResponse(InteropResponse resp, Type ReturnType);
 }
 

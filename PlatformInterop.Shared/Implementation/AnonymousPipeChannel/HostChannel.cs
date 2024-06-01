@@ -6,17 +6,13 @@ internal class HostChannel(
 	AnonymousPipeClientStream inputStream,
 	AnonymousPipeClientStream outputStream) : IInteropChannel
 {
-	public async Task<int> ReceiveAsync(byte[] buffer)
+	public ValueTask<int> ReceiveAsync(Memory<byte> buffer)
 	{
-		return await inputStream.ReadAsync(buffer)
-			.ConfigureAwait(false);
+		return inputStream.ReadAsync(buffer);
 	}
 
-	public async Task SendAsync(byte[] bytes)
+	public ValueTask SendAsync(ReadOnlyMemory<byte> bytes)
 	{
-		await outputStream.WriteAsync(bytes)
-			.ConfigureAwait(false);
-		await outputStream.FlushAsync()
-			.ConfigureAwait(false);
+		return outputStream.WriteAsync(bytes);
 	}
 }

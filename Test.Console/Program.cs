@@ -27,3 +27,11 @@ t1 = DateTime.Now;
 elapsed = t1 - t0;
 
 Console.WriteLine($"read {people.Count} Person objects in {elapsed.TotalSeconds} seconds");
+
+foreach (var person in people)
+{
+	if (person != new Person("alex", "palmer", 33, null))
+	{
+		throw new Exception("people not equal");
+	}
+}

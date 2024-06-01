@@ -2,7 +2,7 @@
 
 public interface IInteropChannel
 {
-	Task SendAsync(byte[] bytes);
+	ValueTask SendAsync(ReadOnlyMemory<byte> bytes);
 
-	Task<int> ReceiveAsync(byte[] buffer);
+	ValueTask<int> ReceiveAsync(Memory<byte> buffer);
 }

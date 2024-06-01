@@ -1,4 +1,4 @@
-﻿using Nito.Collections;
+﻿using Buffer = ByteBuffer.ByteBuffer;
 
 namespace PlatformInterop.Shared.Implementation.JsonInteropSerializer;
 
@@ -32,34 +32,48 @@ internal static class LengthPrefix
 		return [.. buffer];
 	}
 
-	public static bool TryPopPacket(Deque<byte> buffer, out byte[]? packet)
+	public static bool TryPopPacket(Buffer buffer, out byte[]? packet)
 	{
-		if (TryPeekPacket(buffer, out packet))
+		if (!BufferHasPacket(buffer, out int packetLength))
 		{
-			buffer.RemoveRange(0, packet!.Length);
-			return true;
+			packet = null;
+			return false;
 		}
-		return false;
+
+		packet = new byte[packetLength];
+		buffer.PopRange(packet);
+		return true;
 	}
 
-	public static bool TryPeekPacket(Deque<byte> buffer, out byte[]? packet)
+	public static bool TryPeekPacket(Buffer buffer, out byte[]? packet)
+	{
+		if (!BufferHasPacket(buffer, out int packetLength))
+		{
+			packet = null;
+			return false;
+		}
+
+		packet = new byte[packetLength];
+		buffer.PeekRange(packet);
+		return true;
+	}
+
+	private static bool BufferHasPacket(Buffer buffer, out int packetLength)
 	{
 		if (buffer.Count < 4)
 		{
-			packet = null;
+			packetLength = 0;
 			return false;
 		}
 
 		int offset = 0;
-		int packetLength = DecodeInt32(buffer, ref offset);
+		packetLength = DecodeInt32(buffer, ref offset);
 
 		if (packetLength > buffer.Count)
 		{
-			packet = null;
 			return false;
 		}
 
-		packet = buffer.Take(packetLength).ToArray();
 		return true;
 	}
 
